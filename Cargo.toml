@@ -1,0 +1,23 @@
+[package]
+name = "pulse"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "one terminal window for all your local dev servers"
+license = "MIT"
+authors = ["farkhad <bennett@frkhd.com>"]
+
+[[bin]]
+name = "pulse"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"
+panic = "abort"
