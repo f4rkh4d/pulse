@@ -7,6 +7,10 @@ description = "one terminal window for all your local dev servers"
 license = "MIT"
 authors = ["farkhad <bennett@frkhd.com>"]
 
+[lib]
+name = "pulse"
+path = "src/lib.rs"
+
 [[bin]]
 name = "pulse"
 path = "src/main.rs"
@@ -14,6 +18,10 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "1"
+shlex = "1"
 
 [profile.release]
 lto = true
