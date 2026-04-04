@@ -22,6 +22,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 thiserror = "1"
 shlex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [profile.release]
 lto = true
