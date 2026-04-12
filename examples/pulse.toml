@@ -1,0 +1,24 @@
+# sample pulse.toml. copy this into your project root, tweak, run `pulse`.
+
+[[service]]
+name = "api"
+cmd = "cargo run"
+cwd = "./backend"
+env = { PORT = "3000", RUST_LOG = "info" }
+color = "cyan"
+
+[[service]]
+name = "web"
+cmd = "npm run dev"
+cwd = "./frontend"
+color = "magenta"
+
+[[service]]
+name = "postgres"
+cmd = "postgres -D /tmp/pg"
+color = "yellow"
+
+[[service]]
+name = "redis"
+cmd = "redis-server --port 6380"
+color = "red"
