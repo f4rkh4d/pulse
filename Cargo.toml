@@ -6,6 +6,7 @@ rust-version = "1.75"
 description = "one terminal window for all your local dev servers"
 license = "MIT"
 authors = ["farkhad <bennett@frkhd.com>"]
+repository = "https://github.com/f4rkh4d/pulse"
 
 [lib]
 name = "pulse"
@@ -16,19 +17,25 @@ name = "pulse"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
 thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 shlex = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
-nix = { version = "0.29", features = ["signal", "process"] }
-crossterm = { version = "0.28", features = ["event-stream"] }
 regex = "1"
-ratatui = "0.29"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+nix = { version = "0.29", features = ["signal", "process"] }
 ansi-to-tui = "7"
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 lto = true
