@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -18,15 +19,27 @@ pub enum ConfigError {
     BadCmd(String),
     #[error("duplicate service name `{0}`")]
     Duplicate(String),
+    #[error("service `{svc}`: bad duration `{val}` (try `500ms`, `2s`, `1m`)")]
+    BadDuration { svc: String, val: String },
+    #[error("service `{svc}`: depends on unknown service `{dep}`")]
+    UnknownDep { svc: String, dep: String },
+    #[error("service `{svc}`: depends on itself")]
+    SelfDep { svc: String },
+    #[error("circular dependency involving `{0}`")]
+    Cycle(String),
+    #[error("service `{svc}`: unknown agent kind `{kind}` (goblin, cat, ghost, robot, blob)")]
+    BadAgent { svc: String, kind: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(rename = "service", default)]
     pub services: Vec<ServiceSpec>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServiceSpec {
     pub name: String,
     pub cmd: String,
@@ -36,6 +49,50 @@ pub struct ServiceSpec {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub color: Option<String>,
+    #[serde(default)]
+    pub probe: Option<ProbeSpec>,
+    #[serde(default)]
+    pub port: Option<PortSpec>,
+    #[serde(default)]
+    pub agent: Option<AgentSpec>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProbeSpec {
+    pub url: String,
+    #[serde(default = "default_interval")]
+    pub interval: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: String,
+    #[serde(default)]
+    pub expect_status: Option<u16>,
+}
+
+fn default_interval() -> String {
+    "5s".into()
+}
+fn default_timeout() -> String {
+    "2s".into()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortSpec {
+    pub expect: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSpec {
+    #[serde(default = "default_agent_kind")]
+    pub kind: String,
+}
+
+fn default_agent_kind() -> String {
+    "goblin".into()
 }
 
 impl ServiceSpec {
@@ -47,6 +104,52 @@ impl ServiceSpec {
         }
         Ok(parts)
     }
+
+    pub fn probe_interval(&self) -> Result<Duration, ConfigError> {
+        match &self.probe {
+            Some(p) => parse_duration(&p.interval).ok_or(ConfigError::BadDuration {
+                svc: self.name.clone(),
+                val: p.interval.clone(),
+            }),
+            None => Ok(Duration::from_secs(5)),
+        }
+    }
+
+    pub fn probe_timeout(&self) -> Result<Duration, ConfigError> {
+        match &self.probe {
+            Some(p) => parse_duration(&p.timeout).ok_or(ConfigError::BadDuration {
+                svc: self.name.clone(),
+                val: p.timeout.clone(),
+            }),
+            None => Ok(Duration::from_secs(2)),
+        }
+    }
+}
+
+/// parse `500ms`, `2s`, `1m`, `1h`. returns None on garbage.
+pub fn parse_duration(s: &str) -> Option<Duration> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (num, suffix) = split_suffix(s);
+    let n: u64 = num.parse().ok()?;
+    match suffix {
+        "ms" => Some(Duration::from_millis(n)),
+        "s" | "" => Some(Duration::from_secs(n)),
+        "m" => Some(Duration::from_secs(n * 60)),
+        "h" => Some(Duration::from_secs(n * 3600)),
+        _ => None,
+    }
+}
+
+fn split_suffix(s: &str) -> (&str, &str) {
+    let idx = s
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    (&s[..idx], &s[idx..])
 }
 
 pub fn load(path: &Path) -> Result<Config, ConfigError> {
@@ -60,12 +163,44 @@ pub fn parse(raw: &str) -> Result<Config, ConfigError> {
         return Err(ConfigError::Empty);
     }
     let mut seen = std::collections::HashSet::new();
+    let valid_kinds = ["goblin", "cat", "ghost", "robot", "blob"];
     for s in &cfg.services {
-        // validate cmd up front
         let _ = s.parse_cmd()?;
+        let _ = s.probe_interval()?;
+        let _ = s.probe_timeout()?;
+        if let Some(a) = &s.agent {
+            if !valid_kinds.contains(&a.kind.as_str()) {
+                return Err(ConfigError::BadAgent {
+                    svc: s.name.clone(),
+                    kind: a.kind.clone(),
+                });
+            }
+        }
         if !seen.insert(s.name.clone()) {
             return Err(ConfigError::Duplicate(s.name.clone()));
         }
+    }
+    // validate depends_on references exist and no self-loops
+    let names: std::collections::HashSet<&str> =
+        cfg.services.iter().map(|s| s.name.as_str()).collect();
+    for s in &cfg.services {
+        for dep in &s.depends_on {
+            if dep == &s.name {
+                return Err(ConfigError::SelfDep {
+                    svc: s.name.clone(),
+                });
+            }
+            if !names.contains(dep.as_str()) {
+                return Err(ConfigError::UnknownDep {
+                    svc: s.name.clone(),
+                    dep: dep.clone(),
+                });
+            }
+        }
+    }
+    // cycle detection
+    if let Some(bad) = crate::deps::find_cycle(&cfg.services) {
+        return Err(ConfigError::Cycle(bad));
     }
     Ok(cfg)
 }
@@ -133,5 +268,97 @@ mod tests {
         let cfg = parse(raw).unwrap();
         let parts = cfg.services[0].parse_cmd().unwrap();
         assert_eq!(parts, vec!["sh", "-c", "echo hi there"]);
+    }
+
+    #[test]
+    fn parses_probe_and_port() {
+        let raw = r#"
+            [[service]]
+            name = "api"
+            cmd = "./run"
+
+            [service.probe]
+            url = "http://localhost:3000/health"
+            interval = "5s"
+            timeout = "2s"
+
+            [service.port]
+            expect = 3000
+        "#;
+        let cfg = parse(raw).unwrap();
+        assert_eq!(cfg.services[0].port.as_ref().unwrap().expect, 3000);
+        assert_eq!(
+            cfg.services[0].probe.as_ref().unwrap().url,
+            "http://localhost:3000/health"
+        );
+    }
+
+    #[test]
+    fn rejects_bad_duration() {
+        let raw = r#"
+            [[service]]
+            name = "x"
+            cmd = "./run"
+
+            [service.probe]
+            url = "http://x"
+            interval = "soon"
+        "#;
+        assert!(parse(raw).is_err());
+    }
+
+    #[test]
+    fn duration_parser_covers_units() {
+        assert_eq!(parse_duration("500ms"), Some(Duration::from_millis(500)));
+        assert_eq!(parse_duration("2s"), Some(Duration::from_secs(2)));
+        assert_eq!(parse_duration("1m"), Some(Duration::from_secs(60)));
+        assert_eq!(parse_duration("1h"), Some(Duration::from_secs(3600)));
+        assert_eq!(parse_duration("abc"), None);
+        assert_eq!(parse_duration(""), None);
+    }
+
+    #[test]
+    fn rejects_bad_agent_kind() {
+        let raw = r#"
+            [[service]]
+            name = "x"
+            cmd = "./run"
+            [service.agent]
+            kind = "dragon"
+        "#;
+        assert!(parse(raw).is_err());
+    }
+
+    #[test]
+    fn rejects_self_dep() {
+        let raw = r#"
+            [[service]]
+            name = "x"
+            cmd = "./run"
+            depends_on = ["x"]
+        "#;
+        assert!(parse(raw).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_dep() {
+        let raw = r#"
+            [[service]]
+            name = "x"
+            cmd = "./run"
+            depends_on = ["nope"]
+        "#;
+        assert!(parse(raw).is_err());
+    }
+
+    #[test]
+    fn rejects_misspelled_keys() {
+        let raw = r#"
+            [[service]]
+            name = "x"
+            cmd = "./run"
+            colour = "cyan"
+        "#;
+        assert!(parse(raw).is_err());
     }
 }
