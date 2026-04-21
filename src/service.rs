@@ -3,7 +3,10 @@ use std::time::Instant;
 
 use chrono::{DateTime, Local};
 
+use crate::agents::{Agent, Species};
 use crate::config::ServiceSpec;
+use crate::ports::PortState;
+use crate::probe::ProbeState;
 
 pub const LOG_CAP: usize = 2000;
 
@@ -58,10 +61,18 @@ pub struct Service {
     pub last_start: Option<Instant>,
     pub restart_count: u32,
     pub pid: Option<u32>,
+    pub probe: ProbeState,
+    pub port: PortState,
+    pub agent: Option<Agent>,
+    pub last_activity: Option<Instant>,
 }
 
 impl Service {
     pub fn new(spec: ServiceSpec) -> Self {
+        let agent = spec
+            .agent
+            .as_ref()
+            .map(|a| Agent::new(Species::parse(&a.kind)));
         Self {
             spec,
             status: Status::Stopped,
@@ -70,6 +81,10 @@ impl Service {
             last_start: None,
             restart_count: 0,
             pid: None,
+            probe: ProbeState::default(),
+            port: PortState::default(),
+            agent,
+            last_activity: None,
         }
     }
 
@@ -82,6 +97,9 @@ impl Service {
             origin,
             text,
         });
+        if matches!(origin, Origin::Stdout | Origin::Stderr) {
+            self.last_activity = Some(Instant::now());
+        }
     }
 
     pub fn clear_logs(&mut self) {
@@ -104,6 +122,10 @@ mod tests {
             cwd: None,
             env: Default::default(),
             color: None,
+            probe: None,
+            port: None,
+            agent: None,
+            depends_on: Vec::new(),
         })
     }
 
