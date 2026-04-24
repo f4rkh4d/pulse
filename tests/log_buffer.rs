@@ -10,6 +10,10 @@ fn fresh() -> Service {
         cwd: None,
         env: Default::default(),
         color: None,
+        probe: None,
+        port: None,
+        agent: None,
+        depends_on: Vec::new(),
     })
 }
 

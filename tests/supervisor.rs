@@ -13,6 +13,10 @@ async fn spawns_echo_and_captures_stdout() {
         cwd: None,
         env: Default::default(),
         color: None,
+        probe: None,
+        port: None,
+        agent: None,
+        depends_on: Vec::new(),
     };
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sc = spawn_one(0, &spec, tx.clone()).await.expect("spawn");
@@ -46,6 +50,10 @@ async fn bad_binary_errors_out() {
         cwd: None,
         env: Default::default(),
         color: None,
+        probe: None,
+        port: None,
+        agent: None,
+        depends_on: Vec::new(),
     };
     let (tx, _rx) = mpsc::unbounded_channel();
     let r = spawn_one(0, &spec, tx).await;
@@ -62,6 +70,10 @@ async fn env_is_injected() {
         cwd: None,
         env,
         color: None,
+        probe: None,
+        port: None,
+        agent: None,
+        depends_on: Vec::new(),
     };
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sc = spawn_one(0, &spec, tx.clone()).await.expect("spawn");
