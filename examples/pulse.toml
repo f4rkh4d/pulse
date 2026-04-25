@@ -7,18 +7,48 @@ cwd = "./backend"
 env = { PORT = "3000", RUST_LOG = "info" }
 color = "cyan"
 
+[service.probe]
+url = "http://localhost:3000/health"
+interval = "5s"
+timeout = "2s"
+
+[service.port]
+expect = 3000
+
+[service.agent]
+kind = "goblin"
+
 [[service]]
 name = "web"
 cmd = "npm run dev"
 cwd = "./frontend"
 color = "magenta"
+depends_on = ["api"]
+
+[service.port]
+expect = 5173
+
+[service.agent]
+kind = "cat"
 
 [[service]]
 name = "postgres"
 cmd = "postgres -D /tmp/pg"
 color = "yellow"
 
+[service.port]
+expect = 5432
+
+[service.agent]
+kind = "robot"
+
 [[service]]
 name = "redis"
 cmd = "redis-server --port 6380"
 color = "red"
+
+[service.port]
+expect = 6380
+
+[service.agent]
+kind = "blob"
