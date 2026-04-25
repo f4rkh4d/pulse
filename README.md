@@ -8,11 +8,12 @@ one terminal window for all your local dev servers. because 6 tmux panes is stil
 
 ```bash
 cargo install pulse
-cd your-project && cp ~/.cargo/registry/src/*/pulse-*/examples/pulse.toml ./pulse.toml
-pulse
+cd your-project
+pulse init       # scans for package.json / docker-compose / Procfile, drafts a pulse.toml
+pulse            # reads pulse.toml and boots everything
 ```
 
-or drop a `pulse.toml` next to your code by hand:
+or drop a `pulse.toml` in by hand:
 
 ```toml
 [[service]]
@@ -22,19 +23,26 @@ cwd = "./backend"
 env = { PORT = "3000" }
 color = "cyan"
 
+[service.probe]
+url = "http://localhost:3000/health"
+interval = "5s"
+timeout = "2s"
+
+[service.port]
+expect = 3000
+
+[service.agent]
+kind = "goblin"
+
 [[service]]
 name = "web"
 cmd = "npm run dev"
 cwd = "./frontend"
+depends_on = ["api"]
 color = "magenta"
-
-[[service]]
-name = "postgres"
-cmd = "postgres -D /tmp/pg"
-color = "yellow"
 ```
 
-run `pulse`. all three boot together. pick one on the left, read its logs on the right. ctrl+c and everything stops.
+restart `api` and `web` bounces automatically after a 1s grace.
 
 ## keybinds
 
@@ -49,27 +57,64 @@ run `pulse`. all three boot together. pick one on the left, read its logs on the
 | `c`           | clear the current service's log buffer       |
 | `q` / `ctrl+c`| quit. sigterm to children, sigkill if stuck  |
 
+## subcommands
+
+- `pulse init` — scan the cwd and draft a `pulse.toml`. reads `package.json` scripts (`dev`, `start`, `watch`, `test:watch`, `serve`), `docker-compose.yml` services, and `Procfile` entries
+- `pulse ports` — list every process holding a LISTEN tcp port on this box. shells out to `lsof`, unix only
+
+## agents
+
+each service gets an ASCII sentinel living next to its name. five species: `goblin`, `cat`, `ghost`, `robot`, `blob`. pick one via `[service.agent] kind = "..."`. they react to the service state and occasionally say something in the status bar.
+
+example afternoon:
+
+```
+●  ᨀ  api    00:04:21
+      200 · 42ms · 99%
+      :3000 bound
+
+[api] uh, that service just died
+... (crash, exit 1) ...
+
+●  X_X api    00:00:00
+[api] rip api, gone but not forgotten (it's been 3s)
+```
+
+then you fix your bug, `r` to restart:
+
+```
+[api] api back up. third time's the charm
+```
+
+the robot species reads like a little sysadmin (`api: systems nominal`). the cat bats at invisible bugs when probes are slow. the ghost flickers. i spent more time on the message pools than i should have.
+
 ## compared to mprocs
 
-mprocs is great. i used it for a year. pulse is meant to go further: http probing, port auto-detection, live traffic tap. those land in v0.2. today v0.1 is honestly "mprocs with nicer defaults and a roadmap." rounded borders, tokyonight-ish palette, per-service color tags on every log line, ansi passthrough from children.
+mprocs is great. i used it for a year. pulse is meant to go further: http probing, port detection, restart cascade on deps, tiny goblins that tell you when something died. v0.2 ships all four. if you want stable today, use mprocs. if you want this direction, stick around.
 
-if you need stable today, use mprocs. if you want the direction pulse is going, stick around.
+## what's in v0.2
 
-## roadmap
+- **http probes** per service. toml declares `url`, `interval`, `timeout`, optional `expect_status`. sidebar shows status code, latency, rolling success rate over the last 60 probes
+- **port detection**. `[service.port] expect = 3000` polls with a tcp-connect every 2s. badge shows `:3000 bound` (green) or `:3000 free` (dim)
+- **ascii agents** — goblin / cat / ghost / robot / blob sentinels that change face with state and speak in the status bar on transitions
+- **auto-discovery** via `pulse init`
+- **dependency-aware restart** — `depends_on = ["postgres"]` makes `web` bounce after postgres comes back, with a 1s grace
+- **config hot-reload** via the `notify` crate. save `pulse.toml`, diff runs, new services spawn, removed ones get killed
+- **config validation** — misspelled keys, unparseable durations, unknown agent kinds, circular deps all fail loud at load time with a useful error
 
-**v0.2** — the observation layer
-- http probes (user defines `GET /health`, pulse shows up/down/latency)
-- port detection (noticing which ports a service opens)
-- auto-discovery (scan package.json, cargo manifests, docker-compose for likely services)
+### v0.3 plans (not in this release)
 
-**v0.3** — deeper taps
-- live http traffic tap between services (think mitmproxy, but inline)
-- dependency graph (`web` waits for `api` ready, `api` waits for `postgres`)
-- share a session over the network for pair debugging
+- live traffic tap between services (mitmproxy-style, inline in the tui)
+- dependency graph view
+- `pulse share` for pair-debugging sessions
 
-## honest note
+## honest notes
 
-probably has rough edges. i'm a first-year-out-of-highschool generalist and this is my first serious rust tui. the event loop polls exited children on a 150ms tick instead of watching handles cleanly. ansi rendering works for simple cases but complex cursor-movement escapes (think `cargo watch` clearing the screen) will look weird. windows is unsupported right now, not tested. pr + issues welcome.
+- spike detection for the agents is currently a proxy: fast probe + recent activity. a real req/s meter lands later
+- the config watcher leaks a single `Watcher` box so it lives for the process. ugly but works
+- ascii faces use a handful of non-ascii glyphs (ᨀ, ʘ, •). on some fonts they render wide, on a few they get boxes. the robot species is pure ascii if you hit that
+- windows still unsupported, still untested
+- i wrote this as a second-year project. it's held together by tests and optimism
 
 ## license
 
