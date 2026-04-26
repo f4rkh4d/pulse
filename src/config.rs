@@ -31,11 +31,31 @@ pub enum ConfigError {
     BadAgent { svc: String, kind: String },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(rename = "service", default)]
     pub services: Vec<ServiceSpec>,
+    #[serde(default)]
+    pub global: Option<GlobalSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalSpec {
+    #[serde(default)]
+    pub stop_timeout: Option<String>,
+    #[serde(default)]
+    pub log_buffer: Option<usize>,
+}
+
+impl GlobalSpec {
+    pub fn stop_timeout_dur(&self) -> Duration {
+        self.stop_timeout
+            .as_deref()
+            .and_then(parse_duration)
+            .unwrap_or_else(|| Duration::from_millis(1500))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -57,6 +77,25 @@ pub struct ServiceSpec {
     pub agent: Option<AgentSpec>,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub tap: Option<TapSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TapSpec {
+    #[serde(default = "default_tap_mode")]
+    pub mode: String,
+    /// port pulse listens on when mode = proxy. forwards to the probe target.
+    #[serde(default)]
+    pub listen: Option<u16>,
+    /// target port on localhost; defaults to port.expect or parsed from probe url.
+    #[serde(default)]
+    pub target: Option<u16>,
+}
+
+fn default_tap_mode() -> String {
+    "proxy".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
