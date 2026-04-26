@@ -126,6 +126,7 @@ mod tests {
             port: None,
             agent: None,
             depends_on: Vec::new(),
+            tap: None,
         })
     }
 
