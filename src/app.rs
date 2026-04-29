@@ -24,6 +24,17 @@ use crate::probe::{self, ProbeResult};
 use crate::service::{Origin, Service, Status};
 use crate::shutdown;
 use crate::supervisor::{self, SpawnedChild, SupEvent};
+use crate::tap::{self, SharedRing};
+
+/// which full-screen overlay (if any) is active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overlay {
+    None,
+    Tap,
+    TapDetail,
+    Graph,
+    Help,
+}
 
 /// status-bar message with fade-out.
 #[derive(Debug, Clone)]
@@ -52,6 +63,9 @@ pub struct App {
     port_tx: mpsc::UnboundedSender<PortResult>,
     rng: rand::rngs::StdRng,
     pub config_path: Option<PathBuf>,
+    pub overlay: Overlay,
+    pub tap_rings: Vec<Option<SharedRing>>,
+    pub stop_timeout: Duration,
 }
 
 impl App {
@@ -61,10 +75,22 @@ impl App {
         probe_tx: mpsc::UnboundedSender<ProbeResult>,
         port_tx: mpsc::UnboundedSender<PortResult>,
     ) -> Self {
-        let services = cfg.services.into_iter().map(Service::new).collect();
+        let stop_timeout = cfg
+            .global
+            .as_ref()
+            .map(|g| g.stop_timeout_dur())
+            .unwrap_or_else(|| Duration::from_millis(1500));
+        let services: Vec<Service> = cfg.services.into_iter().map(Service::new).collect();
+        let tap_rings: Vec<Option<SharedRing>> = services
+            .iter()
+            .map(|s| s.spec.tap.as_ref().map(|_| tap::new_ring()))
+            .collect();
         Self {
             services,
             selected: 0,
+            overlay: Overlay::None,
+            tap_rings,
+            stop_timeout,
             focus_logs: false,
             filter_mode: false,
             filter_input: String::new(),
@@ -123,6 +149,58 @@ impl App {
         }
     }
 
+    /// spin up the proxy tap for this service if configured. idempotent-ish:
+    /// repeat calls after reloads just bind a new listener if the old one died.
+    pub async fn start_tap(&mut self, idx: usize) {
+        let spec = match self.services.get(idx) {
+            Some(s) => s.spec.clone(),
+            None => return,
+        };
+        let Some(tspec) = spec.tap.clone() else {
+            return;
+        };
+        let ring = match self.tap_rings.get(idx).cloned().flatten() {
+            Some(r) => r,
+            None => {
+                let r = tap::new_ring();
+                if let Some(slot) = self.tap_rings.get_mut(idx) {
+                    *slot = Some(r.clone());
+                }
+                r
+            }
+        };
+        if tap::Mode::parse(&tspec.mode) == tap::Mode::Passive {
+            self.sys_log(
+                idx,
+                "tap: passive mode not implemented, use mode = \"proxy\"",
+            );
+            return;
+        }
+        let Some(listen) = tspec.listen else {
+            self.sys_log(idx, "tap: no listen port configured");
+            return;
+        };
+        let target = match tap::derive_target(
+            &tspec,
+            spec.port.as_ref().map(|p| p.expect),
+            spec.probe.as_ref().map(|p| p.url.as_str()),
+        ) {
+            Some(t) => t,
+            None => {
+                self.sys_log(idx, "tap: can't derive target port");
+                return;
+            }
+        };
+        match tap::run_proxy(listen, target, ring).await {
+            Ok(bound) => {
+                self.sys_log(idx, format!("tap: proxy :{bound} -> :{target}"));
+            }
+            Err(e) => {
+                self.sys_log(idx, format!("tap: bind :{listen} failed: {e}"));
+            }
+        }
+    }
+
     fn start_watchers(&mut self, idx: usize, spec: &crate::config::ServiceSpec) {
         // probe loop
         if let Some(p) = &spec.probe {
@@ -163,7 +241,7 @@ impl App {
     async fn stop_service(&mut self, idx: usize) {
         self.stop_watchers(idx);
         if let Some(mut child) = self.children.remove(&idx) {
-            shutdown::terminate(&mut child, Duration::from_millis(1500)).await;
+            shutdown::terminate(&mut child, self.stop_timeout).await;
         }
         if let Some(s) = self.services.get_mut(idx) {
             s.status = Status::Stopped;
@@ -388,6 +466,10 @@ pub async fn run_with_path(cfg: Config, config_path: Option<PathBuf>) -> Result<
             app.start_service(idx).await;
         }
     }
+    // taps last — so the underlying service has a chance to bind first.
+    for idx in 0..app.services.len() {
+        app.start_tap(idx).await;
+    }
 
     // config watcher (hot-reload). optional; no-op if no path given.
     let mut reload_rx = config_watcher(config_path.clone());
@@ -467,6 +549,34 @@ pub async fn run_with_path(cfg: Config, config_path: Option<PathBuf>) -> Result<
                             app.filter_mode = false;
                             app.filter_input.clear();
                             app.compiled_filter = None;
+                        }
+                        Action::ToggleTap => {
+                            app.overlay = if matches!(app.overlay, Overlay::Tap) {
+                                Overlay::None
+                            } else {
+                                Overlay::Tap
+                            };
+                        }
+                        Action::ToggleTapDetail => {
+                            app.overlay = if matches!(app.overlay, Overlay::TapDetail) {
+                                Overlay::None
+                            } else {
+                                Overlay::TapDetail
+                            };
+                        }
+                        Action::ToggleGraph => {
+                            app.overlay = if matches!(app.overlay, Overlay::Graph) {
+                                Overlay::None
+                            } else {
+                                Overlay::Graph
+                            };
+                        }
+                        Action::ToggleHelp => {
+                            app.overlay = if matches!(app.overlay, Overlay::None) {
+                                Overlay::Help
+                            } else {
+                                Overlay::None
+                            };
                         }
                         Action::None => {}
                     }
@@ -568,15 +678,21 @@ async fn reload_config(app: &mut App) -> Result<()> {
         if let Some(idx) = app.services.iter().position(|s| s.spec.name == *rname) {
             app.stop_service(idx).await;
             app.services.remove(idx);
+            if idx < app.tap_rings.len() {
+                app.tap_rings.remove(idx);
+            }
         }
     }
 
     // added: push + start
     for spec in &new_cfg.services {
         if !old_names.contains(&spec.name) {
+            let ring_slot = spec.tap.as_ref().map(|_| tap::new_ring());
             app.services.push(Service::new(spec.clone()));
+            app.tap_rings.push(ring_slot);
             let idx = app.services.len() - 1;
             app.start_service(idx).await;
+            app.start_tap(idx).await;
         }
     }
 
