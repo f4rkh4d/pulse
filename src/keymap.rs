@@ -15,6 +15,10 @@ pub enum Action {
     FilterBackspace,
     FilterSubmit,
     FilterCancel,
+    ToggleTap,
+    ToggleTapDetail,
+    ToggleGraph,
+    ToggleHelp,
     None,
 }
 
@@ -39,6 +43,11 @@ pub fn map(ev: KeyEvent, filter_mode: bool) -> Action {
         (KeyCode::Char('s'), _) => Action::Stop,
         (KeyCode::Enter, _) => Action::ToggleFocus,
         (KeyCode::Char('/'), _) => Action::StartFilter,
+        (KeyCode::Char('t'), _) => Action::ToggleTap,
+        (KeyCode::Char('T'), _) => Action::ToggleTapDetail,
+        (KeyCode::Char('g'), _) => Action::ToggleGraph,
+        (KeyCode::Char('?'), _) => Action::ToggleHelp,
+        (KeyCode::Esc, _) => Action::ToggleHelp,
         _ => Action::None,
     }
 }
@@ -73,5 +82,23 @@ mod tests {
         assert!(matches!(map(k('x'), true), Action::FilterChar('x')));
         let ev = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         assert!(matches!(map(ev, true), Action::FilterCancel));
+    }
+
+    #[test]
+    fn tap_keys() {
+        assert!(matches!(map(k('t'), false), Action::ToggleTap));
+        assert!(matches!(map(k('T'), false), Action::ToggleTapDetail));
+    }
+
+    #[test]
+    fn graph_and_help_keys() {
+        assert!(matches!(map(k('g'), false), Action::ToggleGraph));
+        assert!(matches!(map(k('?'), false), Action::ToggleHelp));
+    }
+
+    #[test]
+    fn esc_outside_filter_closes_overlays() {
+        let ev = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(matches!(map(ev, false), Action::ToggleHelp));
     }
 }
