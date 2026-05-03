@@ -59,3 +59,7 @@ one logical change per commit when you can. if you have to mash them together, t
 ## code of conduct
 
 be chill. disagreement is fine, condescension isn't. if someone's new to rust or tuis, help them out instead of dunking.
+
+## bug reports
+
+open issues at [github.com/f4rkh4d/pulse/issues](https://github.com/f4rkh4d/pulse/issues) with steps to reproduce.
