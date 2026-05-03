@@ -30,6 +30,33 @@ enum Cmd {
     },
     /// list processes currently listening on tcp ports
     Ports,
+    /// write a self-contained html snapshot of the current stack
+    Share {
+        /// output path. defaults to `pulse-snapshot-<ts>.html`
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
+    /// tail a single service's logs without launching the tui
+    Logs {
+        /// service name as declared in pulse.toml
+        service: String,
+        /// number of lines to show (then exit); 0 = follow forever
+        #[arg(short, long, default_value_t = 0)]
+        lines: usize,
+    },
+    /// theme utilities
+    Theme {
+        #[command(subcommand)]
+        cmd: ThemeCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ThemeCmd {
+    /// print the current defaults as a starter theme.toml
+    Dump,
+    /// show the resolved theme file path (if platform supports it)
+    Path,
 }
 
 #[tokio::main]
@@ -47,6 +74,9 @@ async fn main() -> Result<()> {
     match cli.cmd {
         Some(Cmd::Init { force }) => run_init(force),
         Some(Cmd::Ports) => run_ports(),
+        Some(Cmd::Share { out }) => run_share(&cli.config, out),
+        Some(Cmd::Logs { service, lines }) => run_logs(&cli.config, &service, lines).await,
+        Some(Cmd::Theme { cmd }) => run_theme(cmd),
         None => {
             let cfg = pulse::config::load(&cli.config)
                 .with_context(|| format!("failed to read config at {}", cli.config.display()))?;
@@ -85,6 +115,85 @@ fn run_ports() -> Result<()> {
     println!("{:<6} {:<18} PID", "PORT", "COMMAND");
     for e in list {
         println!("{:<6} {:<18} {}", e.port, e.command, e.pid);
+    }
+    Ok(())
+}
+
+fn run_share(cfg_path: &std::path::Path, out: Option<PathBuf>) -> Result<()> {
+    // a stub snapshot — no live state available when running as a detached
+    // subcommand. we just show the configured topology + empty probe stats.
+    // still useful for "here's my stack" handoffs.
+    let cfg = pulse::config::load(cfg_path)
+        .with_context(|| format!("read config at {}", cfg_path.display()))?;
+    let services: Vec<pulse::service::Service> = cfg
+        .services
+        .into_iter()
+        .map(pulse::service::Service::new)
+        .collect();
+    let tap_rings: Vec<Option<pulse::tap::SharedRing>> = services.iter().map(|_| None).collect();
+    let snap = pulse::share::collect(&services, &tap_rings);
+    let html = pulse::share::render(&snap);
+    let out_path = match out {
+        Some(p) => p,
+        None => {
+            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            PathBuf::from(format!("pulse-snapshot-{ts}.html"))
+        }
+    };
+    std::fs::write(&out_path, html)?;
+    println!("wrote {}", out_path.display());
+    Ok(())
+}
+
+async fn run_logs(cfg_path: &std::path::Path, service: &str, lines: usize) -> Result<()> {
+    let cfg = pulse::config::load(cfg_path)
+        .with_context(|| format!("read config at {}", cfg_path.display()))?;
+    let spec = cfg
+        .services
+        .iter()
+        .find(|s| s.name == service)
+        .ok_or_else(|| anyhow::anyhow!("no service named `{service}` in config"))?
+        .clone();
+
+    use tokio::sync::mpsc;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let sc = pulse::supervisor::spawn_one(0, &spec, tx.clone()).await?;
+    tokio::spawn(sc.watch(0, tx.clone()));
+
+    let mut shown = 0usize;
+    while let Some(ev) = rx.recv().await {
+        if let pulse::supervisor::SupEvent::Log { line, origin, .. } = ev {
+            let mark = match origin {
+                pulse::service::Origin::Stderr => "!",
+                pulse::service::Origin::System => "·",
+                pulse::service::Origin::Stdout => " ",
+            };
+            println!("{mark} {line}");
+            shown += 1;
+            if lines > 0 && shown >= lines {
+                return Ok(());
+            }
+        } else if let pulse::supervisor::SupEvent::Exited { code, .. } = ev {
+            if let Some(c) = code {
+                if c != 0 {
+                    std::process::exit(c);
+                }
+            }
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn run_theme(cmd: ThemeCmd) -> Result<()> {
+    match cmd {
+        ThemeCmd::Dump => {
+            print!("{}", pulse::theme_file::dump_default());
+        }
+        ThemeCmd::Path => match pulse::theme_file::config_path() {
+            Some(p) => println!("{}", p.display()),
+            None => println!("(no config dir on this platform)"),
+        },
     }
     Ok(())
 }
