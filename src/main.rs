@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 /// one terminal window for all your local dev servers.
 #[derive(Parser, Debug)]
@@ -49,6 +49,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ThemeCmd,
     },
+    /// print a shell completion script to stdout
+    Completions {
+        /// shell to generate for (bash, zsh, fish, powershell, elvish)
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -77,12 +82,20 @@ async fn main() -> Result<()> {
         Some(Cmd::Share { out }) => run_share(&cli.config, out),
         Some(Cmd::Logs { service, lines }) => run_logs(&cli.config, &service, lines).await,
         Some(Cmd::Theme { cmd }) => run_theme(cmd),
+        Some(Cmd::Completions { shell }) => run_completions(shell),
         None => {
             let cfg = pulse::config::load(&cli.config)
                 .with_context(|| format!("failed to read config at {}", cli.config.display()))?;
             pulse::app::run_with_path(cfg, Some(cli.config)).await
         }
     }
+}
+
+fn run_completions(shell: clap_complete::Shell) -> Result<()> {
+    let mut cmd = Cli::command();
+    let bin = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, bin, &mut std::io::stdout());
+    Ok(())
 }
 
 fn run_init(force: bool) -> Result<()> {
