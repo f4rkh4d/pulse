@@ -55,12 +55,20 @@ restart `api` and `web` bounces automatically after a 1s grace.
 | `enter`       | toggle logs focus (bigger view)              |
 | `/`           | start a regex filter on the current logs     |
 | `c`           | clear the current service's log buffer       |
+| `t`           | open the tap panel for the selected service  |
+| `T`           | split view on the latest tap request         |
+| `g`           | full-screen dep graph                         |
+| `?`           | help modal with all keybinds                  |
+| `esc`         | close the current overlay                     |
 | `q` / `ctrl+c`| quit. sigterm to children, sigkill if stuck  |
 
 ## subcommands
 
 - `pulse init` — scan the cwd and draft a `pulse.toml`. reads `package.json` scripts (`dev`, `start`, `watch`, `test:watch`, `serve`), `docker-compose.yml` services, and `Procfile` entries
 - `pulse ports` — list every process holding a LISTEN tcp port on this box. shells out to `lsof`, unix only
+- `pulse logs <service> [--lines N]` — run a single service and print its logs. good for pipelines
+- `pulse share [--out path]` — export current config as an html snapshot
+- `pulse theme dump` — print the default palette as a starter `theme.toml`
 
 ## agents
 
@@ -102,11 +110,21 @@ mprocs is great. i used it for a year. pulse is meant to go further: http probin
 - **config hot-reload** via the `notify` crate. save `pulse.toml`, diff runs, new services spawn, removed ones get killed
 - **config validation** — misspelled keys, unparseable durations, unknown agent kinds, circular deps all fail loud at load time with a useful error
 
-### v0.3 plans (not in this release)
+## what's new in v0.3
 
-- live traffic tap between services (mitmproxy-style, inline in the tui)
-- dependency graph view
-- `pulse share` for pair-debugging sessions
+three headline features, all things i kept switching to other tools for:
+
+- **traffic tap**. point pulse at your service port, it proxies and logs every request inline. `t` opens a live panel, `T` splits on the latest request with headers + body preview
+- **dep graph**. `g` draws a full-screen ascii tree of `depends_on` edges. color-coded by overall stack health
+- **`pulse share`**. single-file html snapshot of your stack — services, statuses, last 50 tap events each. no cdn, no fonts. scp it to a coworker
+
+smaller stuff: theme files at `~/.config/pulse/theme.toml`, a `pulse logs <svc>` subcommand for piping, a help modal (`?`), `[global] stop_timeout` for tuning shutdown grace.
+
+## feature tour
+
+[traffic tap demo](./docs/tap.gif) · [graph view](./docs/graph.gif) · [share export](./docs/share.png) · [theme swap](./docs/theme.gif) · [help modal](./docs/help.gif)
+
+these gifs don't exist yet. i owe you gifs. noted.
 
 ## honest notes
 
