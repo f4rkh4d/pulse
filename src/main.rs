@@ -16,6 +16,10 @@ struct Cli {
     #[arg(short, long, default_value = "pulse.toml")]
     config: PathBuf,
 
+    /// skip the startup banner
+    #[arg(long)]
+    quiet: bool,
+
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -84,6 +88,9 @@ async fn main() -> Result<()> {
         Some(Cmd::Theme { cmd }) => run_theme(cmd),
         Some(Cmd::Completions { shell }) => run_completions(shell),
         None => {
+            if !cli.quiet {
+                eprint!("{}", pulse::banner(env!("CARGO_PKG_VERSION")));
+            }
             let cfg = pulse::config::load(&cli.config)
                 .with_context(|| format!("failed to read config at {}", cli.config.display()))?;
             pulse::app::run_with_path(cfg, Some(cli.config)).await
