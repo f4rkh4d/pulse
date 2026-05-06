@@ -8,6 +8,7 @@ pub mod app;
 pub mod config;
 pub mod deps;
 pub mod discover;
+pub mod errors;
 pub mod graph;
 pub mod keymap;
 pub mod ports;

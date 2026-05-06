@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 
 /// one terminal window for all your local dev servers.
@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
                 eprint!("{}", pulse::banner(env!("CARGO_PKG_VERSION")));
             }
             let cfg = pulse::config::load(&cli.config)
-                .with_context(|| format!("failed to read config at {}", cli.config.display()))?;
+                .map_err(|e| pulse::errors::explain(e, &cli.config))?;
             pulse::app::run_with_path(cfg, Some(cli.config)).await
         }
     }
@@ -143,8 +143,7 @@ fn run_share(cfg_path: &std::path::Path, out: Option<PathBuf>) -> Result<()> {
     // a stub snapshot — no live state available when running as a detached
     // subcommand. we just show the configured topology + empty probe stats.
     // still useful for "here's my stack" handoffs.
-    let cfg = pulse::config::load(cfg_path)
-        .with_context(|| format!("read config at {}", cfg_path.display()))?;
+    let cfg = pulse::config::load(cfg_path).map_err(|e| pulse::errors::explain(e, cfg_path))?;
     let services: Vec<pulse::service::Service> = cfg
         .services
         .into_iter()
@@ -166,8 +165,7 @@ fn run_share(cfg_path: &std::path::Path, out: Option<PathBuf>) -> Result<()> {
 }
 
 async fn run_logs(cfg_path: &std::path::Path, service: &str, lines: usize) -> Result<()> {
-    let cfg = pulse::config::load(cfg_path)
-        .with_context(|| format!("read config at {}", cfg_path.display()))?;
+    let cfg = pulse::config::load(cfg_path).map_err(|e| pulse::errors::explain(e, cfg_path))?;
     let spec = cfg
         .services
         .iter()
