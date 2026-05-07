@@ -49,6 +49,7 @@ pub const BG_SEL: Color = Color::Rgb(40, 44, 60);
 pub const BORDER: Color = Color::Rgb(86, 95, 137);
 pub const DIM: Color = Color::Rgb(130, 139, 172);
 pub const FG: Color = Color::Rgb(192, 202, 245);
+pub const ACCENT: Color = Color::Rgb(94, 234, 212);
 
 pub const RUNNING: Color = Color::Rgb(158, 206, 106);
 pub const STARTING: Color = Color::Rgb(224, 175, 104);
