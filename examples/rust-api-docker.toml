@@ -1,0 +1,60 @@
+# rust api (axum/actix/whatever) + sqlite (file, no daemon) + nginx via docker
+# + an esbuild watcher for a small static frontend. sqlite "service" is a
+# no-op watcher that just keeps the file present.
+
+[global]
+stop_timeout = "2s"
+
+[[service]]
+name = "sqlite"
+cmd = "sh -c 'touch ./app.db && tail -f /dev/null'"
+color = "yellow"
+
+[service.agent]
+kind = "blob"
+
+[[service]]
+name = "api"
+cmd = "cargo run --bin api"
+cwd = "./backend"
+color = "cyan"
+depends_on = ["sqlite"]
+env = { DATABASE_URL = "sqlite://./app.db", PORT = "4000", RUST_LOG = "info" }
+
+[service.probe]
+url = "http://localhost:4000/healthz"
+interval = "3s"
+timeout = "2s"
+expect_status = 200
+
+[service.port]
+expect = 4000
+
+[service.tap]
+mode = "proxy"
+listen = 4010
+target = 4000
+
+[service.agent]
+kind = "blob"
+
+[[service]]
+name = "nginx"
+cmd = "docker compose up nginx"
+color = "magenta"
+depends_on = ["api"]
+
+[service.port]
+expect = 8080
+
+[service.agent]
+kind = "blob"
+
+[[service]]
+name = "esbuild"
+cmd = "npx esbuild src/main.ts --bundle --watch --outfile=public/main.js"
+cwd = "./frontend"
+color = "green"
+
+[service.agent]
+kind = "blob"

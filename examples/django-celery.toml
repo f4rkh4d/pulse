@@ -1,0 +1,71 @@
+# django + postgres + celery worker + celery beat.
+# assumes a standard layout: manage.py at repo root, settings pulls DB from env.
+
+[global]
+stop_timeout = "4s"
+
+[[service]]
+name = "postgres"
+cmd = "postgres -D ./.pgdata"
+color = "yellow"
+
+[service.port]
+expect = 5432
+
+[service.agent]
+kind = "goblin"
+
+[[service]]
+name = "redis"
+cmd = "redis-server --port 6379 --save ''"
+color = "red"
+
+[service.port]
+expect = 6379
+
+[service.agent]
+kind = "goblin"
+
+[[service]]
+name = "web"
+cmd = "python manage.py runserver 0.0.0.0:8000"
+color = "cyan"
+depends_on = ["postgres"]
+env = { DJANGO_SETTINGS_MODULE = "app.settings.dev", DATABASE_URL = "postgres://localhost/app", REDIS_URL = "redis://localhost:6379/0" }
+
+[service.probe]
+url = "http://localhost:8000/health/"
+interval = "5s"
+timeout = "2s"
+expect_status = 200
+
+[service.port]
+expect = 8000
+
+[service.tap]
+mode = "proxy"
+listen = 8010
+target = 8000
+
+[service.agent]
+kind = "goblin"
+
+[[service]]
+name = "worker"
+cmd = "celery -A app worker -l info"
+color = "green"
+depends_on = ["postgres", "redis"]
+env = { DJANGO_SETTINGS_MODULE = "app.settings.dev", REDIS_URL = "redis://localhost:6379/0" }
+
+[service.agent]
+kind = "goblin"
+
+[[service]]
+name = "beat"
+cmd = "celery -A app beat -l info"
+color = "blue"
+depends_on = ["redis"]
+env = { DJANGO_SETTINGS_MODULE = "app.settings.dev", REDIS_URL = "redis://localhost:6379/0" }
+
+[service.agent]
+kind = "goblin"

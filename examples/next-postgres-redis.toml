@@ -1,0 +1,61 @@
+# next.js + postgres + redis + a local stripe webhook forwarder.
+# runs `pulse` from your repo root.
+
+[global]
+stop_timeout = "3s"
+
+[[service]]
+name = "postgres"
+cmd = "postgres -D ./.pgdata"
+color = "yellow"
+
+[service.port]
+expect = 5432
+
+[service.agent]
+kind = "robot"
+
+[[service]]
+name = "redis"
+cmd = "redis-server --port 6379 --save ''"
+color = "red"
+
+[service.port]
+expect = 6379
+
+[service.agent]
+kind = "robot"
+
+[[service]]
+name = "web"
+cmd = "npm run dev"
+cwd = "./"
+color = "cyan"
+depends_on = ["postgres", "redis"]
+env = { DATABASE_URL = "postgres://localhost/app_dev", REDIS_URL = "redis://localhost:6379", PORT = "3000" }
+
+[service.probe]
+url = "http://localhost:3000/api/health"
+interval = "3s"
+timeout = "2s"
+expect_status = 200
+
+[service.port]
+expect = 3000
+
+[service.tap]
+mode = "proxy"
+listen = 3010
+target = 3000
+
+[service.agent]
+kind = "robot"
+
+[[service]]
+name = "stripe"
+cmd = "stripe listen --forward-to localhost:3000/api/webhooks/stripe"
+color = "magenta"
+depends_on = ["web"]
+
+[service.agent]
+kind = "robot"

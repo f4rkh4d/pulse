@@ -1,0 +1,71 @@
+# rails + postgres + sidekiq + webpack-dev-server (shakapacker / jsbundling).
+# `bundle exec` wrappers kept so bundler resolution stays honest.
+
+[global]
+stop_timeout = "4s"
+
+[[service]]
+name = "postgres"
+cmd = "postgres -D ./tmp/pg"
+color = "yellow"
+
+[service.port]
+expect = 5432
+
+[service.agent]
+kind = "ghost"
+
+[[service]]
+name = "redis"
+cmd = "redis-server --port 6379 --save ''"
+color = "red"
+
+[service.port]
+expect = 6379
+
+[service.agent]
+kind = "ghost"
+
+[[service]]
+name = "web"
+cmd = "bundle exec rails server -p 3000"
+color = "cyan"
+depends_on = ["postgres"]
+env = { RAILS_ENV = "development", DATABASE_URL = "postgres://localhost/app_development" }
+
+[service.probe]
+url = "http://localhost:3000/up"
+interval = "5s"
+timeout = "2s"
+
+[service.port]
+expect = 3000
+
+[service.tap]
+mode = "proxy"
+listen = 3010
+target = 3000
+
+[service.agent]
+kind = "ghost"
+
+[[service]]
+name = "sidekiq"
+cmd = "bundle exec sidekiq"
+color = "magenta"
+depends_on = ["postgres", "redis"]
+env = { RAILS_ENV = "development", REDIS_URL = "redis://localhost:6379/0" }
+
+[service.agent]
+kind = "ghost"
+
+[[service]]
+name = "js"
+cmd = "bin/shakapacker-dev-server"
+color = "green"
+
+[service.port]
+expect = 3035
+
+[service.agent]
+kind = "ghost"
