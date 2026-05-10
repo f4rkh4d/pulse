@@ -2,7 +2,7 @@
 
 one terminal window for all your local dev servers. because 6 tmux panes is still 6 tmux panes.
 
-![demo](./docs/demo.gif)
+![boot](./docs/cast-boot.gif)
 
 ## quick start
 
@@ -120,11 +120,15 @@ three headline features, all things i kept switching to other tools for:
 
 smaller stuff: theme files at `~/.config/pulse/theme.toml`, a `pulse logs <svc>` subcommand for piping, a help modal (`?`), `[global] stop_timeout` for tuning shutdown grace.
 
-## feature tour
+## gallery
 
-[traffic tap demo](./docs/tap.gif) · [graph view](./docs/graph.gif) · [share export](./docs/share.png) · [theme swap](./docs/theme.gif) · [help modal](./docs/help.gif)
+- ![boot](./docs/cast-boot.gif) — cold start, everything coming up
+- ![probes](./docs/cast-probe.gif) — probes flipping green, then a service crashing
+- ![tap](./docs/cast-tap.gif) — traffic tap + request detail split
+- ![graph](./docs/cast-graph.gif) — `g` for the dep graph
+- ![share](./docs/cast-share.gif) — `pulse share` making an html snapshot
 
-these gifs don't exist yet. i owe you gifs. noted.
+gifs live in `docs/`. they're placeholders right now, real asciinema casts land before 0.4.
 
 ## honest notes
 
