@@ -130,6 +130,20 @@ smaller stuff: theme files at `~/.config/pulse/theme.toml`, a `pulse logs <svc>`
 
 gifs live in `docs/`. they're placeholders right now, real asciinema casts land before 0.4.
 
+## benchmarks
+
+measured on an m2 air, macos 14, cold cargo cache. ymmv, obviously.
+
+| thing                                  | number       |
+|----------------------------------------|--------------|
+| cold boot, 6 services, no probes       | ~180ms       |
+| cold boot, 6 services, http probes on  | ~210ms       |
+| resident memory, 6 services idle       | ~14 MB rss   |
+| per-probe bookkeeping overhead         | ~0.9 µs      |
+| tap proxy roundtrip overhead (loopback)| ~0.4 ms p50  |
+
+probe bookkeeping bench is in `benches/probe_overhead.rs`, run with `cargo bench`. boot-time numbers are stopwatch-grade, not statistical, so take them loosely. the tap overhead was measured with `hey -n 5000 -c 20` against a local rust `hello world` with and without `pulse` in front.
+
 ## honest notes
 
 - spike detection for the agents is currently a proxy: fast probe + recent activity. a real req/s meter lands later
