@@ -1,19 +1,79 @@
 # pulse
 
-one terminal window for all your local dev servers. because 6 tmux panes is still 6 tmux panes.
+one window for every local dev server. six tmux panes is still six tmux panes, and you know it.
 
 ![boot](./docs/cast-boot.gif)
-
-## quick start
 
 ```bash
 cargo install pulse
 cd your-project
-pulse init       # scans for package.json / docker-compose / Procfile, drafts a pulse.toml
-pulse            # reads pulse.toml and boots everything
+pulse init    # scans for package.json / docker-compose / Procfile, drafts a pulse.toml
+pulse
 ```
 
-or drop a `pulse.toml` in by hand:
+pulse reads `pulse.toml`, spawns every service, probes their health, watches their ports, and draws a tui with logs per service. restart one and its dependents bounce on their own. type `t` to tap live http traffic. type `g` for an ascii dep graph. that's most of it.
+
+## why another one of these
+
+mprocs runs commands in panes. great tool, i used it for a year. pulse is what i kept wishing it did:
+
+| feature                   | pulse | mprocs | tmux | pm2 |
+|---------------------------|-------|--------|------|-----|
+| multiplex processes       |  yes  |  yes   | yes  | yes |
+| per-service log panes     |  yes  |  yes   | diy  | yes |
+| http health probe         |  yes  |   no   |  no  | diy |
+| port-in-use detection     |  yes  |   no   |  no  |  no |
+| restart cascade on deps   |  yes  |   no   |  no  |  no |
+| live traffic tap + replay |  yes  |   no   |  no  |  no |
+| ascii sentinel per svc    |  yes  |   no   |  no  |  no |
+| config in one toml file   |  yes  |  yes   |  no  | yes |
+| auto-discover from repo   |  yes  |   no   |  no  |  no |
+
+pm2 is production-shaped and it shows in local dev. tmux is a multiplexer, not a process manager. mprocs is still the thing to beat.
+
+## what you get
+
+- **probes**. per-service http poll, latency + rolling success rate in the sidebar
+- **port watch**. `[service.port] expect = 3000` → green `:3000 bound` badge, dim `:3000 free` when it's not
+- **traffic tap**. tiny reverse-proxy records the last 500 requests per service. `t` opens the list, `T` splits on the latest request with headers + body preview
+- **dep restart**. `depends_on = ["postgres"]` bounces `web` after postgres comes back. 1s grace, configurable
+- **ascii sentinels**. one of five species per service (goblin, cat, ghost, robot, blob). they react to state and say things in the status bar
+- **auto-discover**. `pulse init` reads `package.json` scripts, `docker-compose.yml` services, `Procfile` entries and drafts a config
+
+## sentinels
+
+teaser, three species:
+
+```
+  ᨀ    goblin    "api back up. third time's the charm"
+  ≋    blob      "postgres is just vibing at 5432"
+  ᓚ    cat       "probe latency is weird, i'm watching it"
+```
+
+the robot species is pure ascii for fonts that don't like the others. pick per service via `[service.agent] kind = "..."`.
+
+## gallery
+
+- ![boot](./docs/cast-boot.gif) — cold start, everything coming up
+- ![probes](./docs/cast-probe.gif) — probes flipping green, then a service crashing
+- ![tap](./docs/cast-tap.gif) — traffic tap + request detail split
+- ![graph](./docs/cast-graph.gif) — `g` for the dep graph
+- ![share](./docs/cast-share.gif) — `pulse share` making an html snapshot
+
+gifs live in `docs/`. they're placeholders right now, real asciinema casts land before 0.4.
+
+## stack examples
+
+runnable `pulse.toml` for common stacks. copy into your project root, tweak cwds.
+
+- [next.js + postgres + redis + stripe](./examples/next-postgres-redis.toml)
+- [django + postgres + celery + beat](./examples/django-celery.toml)
+- [rails + postgres + sidekiq + js](./examples/rails-sidekiq.toml)
+- [rust api + sqlite + nginx (docker) + esbuild](./examples/rust-api-docker.toml)
+
+each sets probes on the right health endpoints, uses `depends_on` to cascade restarts, picks a different sentinel species, and sets up a traffic tap on the http service.
+
+## minimal config
 
 ```toml
 [[service]]
@@ -42,7 +102,7 @@ depends_on = ["api"]
 color = "magenta"
 ```
 
-restart `api` and `web` bounces automatically after a 1s grace.
+save `pulse.toml`, run `pulse`. edit the file while it's running and the watcher diffs + restarts affected services.
 
 ## keybinds
 
@@ -64,71 +124,20 @@ restart `api` and `web` bounces automatically after a 1s grace.
 
 ## subcommands
 
-- `pulse init` — scan the cwd and draft a `pulse.toml`. reads `package.json` scripts (`dev`, `start`, `watch`, `test:watch`, `serve`), `docker-compose.yml` services, and `Procfile` entries
+- `pulse init` — scan cwd and draft a `pulse.toml`. reads `package.json` scripts (`dev`, `start`, `watch`, `test:watch`, `serve`), `docker-compose.yml` services, and `Procfile` entries
 - `pulse ports` — list every process holding a LISTEN tcp port on this box. shells out to `lsof`, unix only
 - `pulse logs <service> [--lines N]` — run a single service and print its logs. good for pipelines
-- `pulse share [--out path]` — export current config as an html snapshot
+- `pulse share [--out path]` — export current config as a single-file html snapshot
 - `pulse theme dump` — print the default palette as a starter `theme.toml`
+- `pulse completions <shell>` — emit a completion script. bash/zsh/fish/powershell/elvish
 
-## agents
+shell completion, one-liners:
 
-each service gets an ASCII sentinel living next to its name. five species: `goblin`, `cat`, `ghost`, `robot`, `blob`. pick one via `[service.agent] kind = "..."`. they react to the service state and occasionally say something in the status bar.
-
-example afternoon:
-
+```bash
+pulse completions bash > /usr/local/etc/bash_completion.d/pulse
+pulse completions zsh  > ~/.zsh/completions/_pulse
+pulse completions fish > ~/.config/fish/completions/pulse.fish
 ```
-●  ᨀ  api    00:04:21
-      200 · 42ms · 99%
-      :3000 bound
-
-[api] uh, that service just died
-... (crash, exit 1) ...
-
-●  X_X api    00:00:00
-[api] rip api, gone but not forgotten (it's been 3s)
-```
-
-then you fix your bug, `r` to restart:
-
-```
-[api] api back up. third time's the charm
-```
-
-the robot species reads like a little sysadmin (`api: systems nominal`). the cat bats at invisible bugs when probes are slow. the ghost flickers. i spent more time on the message pools than i should have.
-
-## compared to mprocs
-
-mprocs is great. i used it for a year. pulse is meant to go further: http probing, port detection, restart cascade on deps, tiny goblins that tell you when something died. v0.2 ships all four. if you want stable today, use mprocs. if you want this direction, stick around.
-
-## what's in v0.2
-
-- **http probes** per service. toml declares `url`, `interval`, `timeout`, optional `expect_status`. sidebar shows status code, latency, rolling success rate over the last 60 probes
-- **port detection**. `[service.port] expect = 3000` polls with a tcp-connect every 2s. badge shows `:3000 bound` (green) or `:3000 free` (dim)
-- **ascii agents** — goblin / cat / ghost / robot / blob sentinels that change face with state and speak in the status bar on transitions
-- **auto-discovery** via `pulse init`
-- **dependency-aware restart** — `depends_on = ["postgres"]` makes `web` bounce after postgres comes back, with a 1s grace
-- **config hot-reload** via the `notify` crate. save `pulse.toml`, diff runs, new services spawn, removed ones get killed
-- **config validation** — misspelled keys, unparseable durations, unknown agent kinds, circular deps all fail loud at load time with a useful error
-
-## what's new in v0.3
-
-three headline features, all things i kept switching to other tools for:
-
-- **traffic tap**. point pulse at your service port, it proxies and logs every request inline. `t` opens a live panel, `T` splits on the latest request with headers + body preview
-- **dep graph**. `g` draws a full-screen ascii tree of `depends_on` edges. color-coded by overall stack health
-- **`pulse share`**. single-file html snapshot of your stack — services, statuses, last 50 tap events each. no cdn, no fonts. scp it to a coworker
-
-smaller stuff: theme files at `~/.config/pulse/theme.toml`, a `pulse logs <svc>` subcommand for piping, a help modal (`?`), `[global] stop_timeout` for tuning shutdown grace.
-
-## gallery
-
-- ![boot](./docs/cast-boot.gif) — cold start, everything coming up
-- ![probes](./docs/cast-probe.gif) — probes flipping green, then a service crashing
-- ![tap](./docs/cast-tap.gif) — traffic tap + request detail split
-- ![graph](./docs/cast-graph.gif) — `g` for the dep graph
-- ![share](./docs/cast-share.gif) — `pulse share` making an html snapshot
-
-gifs live in `docs/`. they're placeholders right now, real asciinema casts land before 0.4.
 
 ## benchmarks
 
@@ -144,13 +153,17 @@ measured on an m2 air, macos 14, cold cargo cache. ymmv, obviously.
 
 probe bookkeeping bench is in `benches/probe_overhead.rs`, run with `cargo bench`. boot-time numbers are stopwatch-grade, not statistical, so take them loosely. the tap overhead was measured with `hey -n 5000 -c 20` against a local rust `hello world` with and without `pulse` in front.
 
+## compared to mprocs, again
+
+short version: if you want something that works today, rock solid, big community, use mprocs. if you want probes + ports + tap + cascades in one config file, that's this. both are fine choices.
+
 ## honest notes
 
-- spike detection for the agents is currently a proxy: fast probe + recent activity. a real req/s meter lands later
-- the config watcher leaks a single `Watcher` box so it lives for the process. ugly but works
-- ascii faces use a handful of non-ascii glyphs (ᨀ, ʘ, •). on some fonts they render wide, on a few they get boxes. the robot species is pure ascii if you hit that
-- windows still unsupported, still untested
-- i wrote this as a second-year project. it's held together by tests and optimism
+- spike detection for the sentinels is a proxy: fast probe + recent stdout. a real req/s meter lands in 0.4
+- the config watcher leaks a single `Watcher` box so it lives for the process. i know. still works
+- sentinels use a couple of non-ascii glyphs (ᨀ, ʘ, ≋). on some fonts they render wide, on a few they become boxes. the robot species is pure ascii for those
+- windows still untested. i don't have a windows machine and i'm not great at CI
+- wrote this as a second-year project. it's held together with tests and optimism
 
 ## license
 
