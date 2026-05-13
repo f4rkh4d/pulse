@@ -19,6 +19,11 @@ pub enum Action {
     ToggleTapDetail,
     ToggleGraph,
     ToggleHelp,
+    ScrollLogsUp,
+    ScrollLogsDown,
+    ScrollLogsTop,
+    ScrollLogsBottom,
+    ShareNow,
     None,
 }
 
@@ -40,13 +45,20 @@ pub fn map(ev: KeyEvent, filter_mode: bool) -> Action {
         (KeyCode::Char('k'), _) | (KeyCode::Up, _) => Action::NavUp,
         (KeyCode::Char('r'), _) => Action::Restart,
         (KeyCode::Char('S'), _) => Action::StopAll,
-        (KeyCode::Char('s'), _) => Action::Stop,
+        (KeyCode::Char('s'), _) => Action::ShareNow,
         (KeyCode::Enter, _) => Action::ToggleFocus,
         (KeyCode::Char('/'), _) => Action::StartFilter,
         (KeyCode::Char('t'), _) => Action::ToggleTap,
         (KeyCode::Char('T'), _) => Action::ToggleTapDetail,
+        (KeyCode::Char('g'), KeyModifiers::CONTROL) => Action::ScrollLogsTop,
         (KeyCode::Char('g'), _) => Action::ToggleGraph,
         (KeyCode::Char('?'), _) => Action::ToggleHelp,
+        (KeyCode::Char('u'), _) | (KeyCode::PageUp, _) => Action::ScrollLogsUp,
+        (KeyCode::Char('d'), _) | (KeyCode::PageDown, _) => Action::ScrollLogsDown,
+        (KeyCode::Char('G'), _) => Action::ScrollLogsBottom,
+        (KeyCode::Home, _) => Action::ScrollLogsTop,
+        (KeyCode::End, _) => Action::ScrollLogsBottom,
+        (KeyCode::Char('x'), _) => Action::Stop,
         (KeyCode::Esc, _) => Action::ToggleHelp,
         _ => Action::None,
     }
@@ -66,8 +78,9 @@ mod tests {
         assert!(matches!(map(k('j'), false), Action::NavDown));
         assert!(matches!(map(k('k'), false), Action::NavUp));
         assert!(matches!(map(k('r'), false), Action::Restart));
-        assert!(matches!(map(k('s'), false), Action::Stop));
+        assert!(matches!(map(k('x'), false), Action::Stop));
         assert!(matches!(map(k('S'), false), Action::StopAll));
+        assert!(matches!(map(k('s'), false), Action::ShareNow));
         assert!(matches!(map(k('/'), false), Action::StartFilter));
     }
 
@@ -100,5 +113,23 @@ mod tests {
     fn esc_outside_filter_closes_overlays() {
         let ev = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         assert!(matches!(map(ev, false), Action::ToggleHelp));
+    }
+
+    #[test]
+    fn scroll_keys_map() {
+        assert!(matches!(map(k('u'), false), Action::ScrollLogsUp));
+        assert!(matches!(map(k('d'), false), Action::ScrollLogsDown));
+        assert!(matches!(map(k('G'), false), Action::ScrollLogsBottom));
+        let home = KeyEvent::new(KeyCode::Home, KeyModifiers::NONE);
+        assert!(matches!(map(home, false), Action::ScrollLogsTop));
+        let ctrl_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+        assert!(matches!(map(ctrl_g, false), Action::ScrollLogsTop));
+        let pgup = KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE);
+        assert!(matches!(map(pgup, false), Action::ScrollLogsUp));
+    }
+
+    #[test]
+    fn share_key_maps() {
+        assert!(matches!(map(k('s'), false), Action::ShareNow));
     }
 }
