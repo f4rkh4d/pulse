@@ -63,6 +63,8 @@ fn spec_parse_cmd_quotes() {
         agent: None,
         depends_on: Vec::new(),
         tap: None,
+        auto_restart: None,
+        watch_env: None,
     };
     assert_eq!(spec.parse_cmd().unwrap(), vec!["sh", "-c", "echo hi there"]);
 }

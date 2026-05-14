@@ -15,6 +15,8 @@ fn fresh() -> Service {
         agent: None,
         depends_on: Vec::new(),
         tap: None,
+        auto_restart: None,
+        watch_env: None,
     })
 }
 

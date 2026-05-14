@@ -112,6 +112,8 @@ mod tests {
             agent: None,
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             tap: None,
+            auto_restart: None,
+            watch_env: None,
         }
     }
 
