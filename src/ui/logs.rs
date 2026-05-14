@@ -23,6 +23,14 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
+    // scrolled-up indicator on the top border
+    let scroll_hint = match svc {
+        Some(s) if s.is_scrolled() => {
+            format!(" (scrolled · {} lines below) ", s.log_scroll)
+        }
+        _ => String::new(),
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -30,6 +38,10 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .title(Span::styled(
             title,
             Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+        ))
+        .title(Span::styled(
+            scroll_hint,
+            Style::default().fg(theme::ACCENT),
         ))
         .title_bottom(Span::styled(filter_hint, Style::default().fg(theme::DIM)));
 
@@ -68,13 +80,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             Origin::System => " ·",
             Origin::Stdout => "  ",
         };
-        // parse ansi escapes from child output, fall back to plain text.
         let body: Text = log
             .text
             .clone()
             .into_text()
             .unwrap_or_else(|_| Text::from(log.text.clone()));
-        // each log entry becomes a single line; we splice the ANSI spans in.
         let mut spans: Vec<Span> = vec![
             Span::styled(ts, Style::default().fg(theme::DIM)),
             Span::raw(" "),
@@ -91,10 +101,14 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(spans));
     }
 
-    // tail: only show what fits (let Paragraph handle it, but keep last N)
+    // pick window based on scroll offset. scroll=0 pins to tail.
     let height = area.height.saturating_sub(2) as usize;
-    let start = lines.len().saturating_sub(height.max(1));
-    let visible = lines[start..].to_vec();
+    let page = height.max(1);
+    let total = lines.len();
+    let offset = svc.log_scroll.min(total.saturating_sub(1));
+    let end = total.saturating_sub(offset);
+    let start = end.saturating_sub(page);
+    let visible = lines[start..end].to_vec();
 
     let p = Paragraph::new(visible)
         .block(block)
