@@ -58,6 +58,17 @@ impl GlobalSpec {
     }
 }
 
+impl Config {
+    /// default to 2000 when unspecified. used to size the per-service ring.
+    pub fn log_buffer_size(&self) -> usize {
+        self.global
+            .as_ref()
+            .and_then(|g| g.log_buffer)
+            .unwrap_or(2000)
+            .max(1)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceSpec {
@@ -79,6 +90,14 @@ pub struct ServiceSpec {
     pub depends_on: Vec<String>,
     #[serde(default)]
     pub tap: Option<TapSpec>,
+    /// restart the service on unexpected exit with exponential backoff.
+    /// default true. set `auto_restart = false` to opt out.
+    #[serde(default)]
+    pub auto_restart: Option<bool>,
+    /// watch `.env`, `.env.local`, `.env.development` in cwd and restart on
+    /// change. default true when any of those files exist at startup.
+    #[serde(default)]
+    pub watch_env: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -135,6 +154,13 @@ fn default_agent_kind() -> String {
 }
 
 impl ServiceSpec {
+    pub fn auto_restart_enabled(&self) -> bool {
+        self.auto_restart.unwrap_or(true)
+    }
+    pub fn watch_env_enabled(&self) -> bool {
+        self.watch_env.unwrap_or(true)
+    }
+
     pub fn parse_cmd(&self) -> Result<Vec<String>, ConfigError> {
         let parts =
             shlex::split(&self.cmd).ok_or_else(|| ConfigError::BadCmd(self.name.clone()))?;
