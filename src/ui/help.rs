@@ -24,10 +24,20 @@ pub const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "actions",
         &[
             ("r", "restart service"),
-            ("s", "stop service"),
+            ("x", "stop service"),
             ("S", "stop all"),
             ("c", "clear logs"),
+            ("s", "share snapshot now"),
             ("q / ctrl+c", "quit pulse"),
+        ],
+    ),
+    (
+        "logs",
+        &[
+            ("u / pgup", "scroll up a page"),
+            ("d / pgdn", "scroll down a page"),
+            ("G / end", "jump to tail"),
+            ("home / ctrl+g", "jump to top"),
         ],
     ),
     (
@@ -128,9 +138,9 @@ mod tests {
     use super::SECTIONS;
 
     #[test]
-    fn three_sections_present() {
+    fn all_sections_present() {
         let titles: Vec<_> = SECTIONS.iter().map(|(t, _)| *t).collect();
-        assert_eq!(titles, vec!["navigation", "actions", "views"]);
+        assert_eq!(titles, vec!["navigation", "actions", "logs", "views"]);
     }
 
     #[test]
