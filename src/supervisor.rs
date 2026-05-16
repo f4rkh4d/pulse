@@ -157,6 +157,34 @@ pub fn backoff_delay(last_start: Option<Instant>, restart_count: u32) -> Duratio
     }
 }
 
+/// the crash-ladder we hand out for auto-restart. 1s, 2s, 4s, 8s, 15s cap.
+pub fn crash_backoff(streak: u32) -> Duration {
+    let secs = match streak {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        _ => 15,
+    };
+    Duration::from_secs(secs)
+}
+
+/// after this many consecutive quick crashes we stop auto-restarting.
+pub const CRASH_GIVE_UP: u32 = 5;
+
+/// a service is considered "crashing in a loop" when it dies within this
+/// window of last_start. runs longer than that reset the streak.
+pub fn is_quick_crash(last_start: Option<Instant>) -> bool {
+    match last_start {
+        Some(t) => t.elapsed() < Duration::from_secs(2),
+        None => false,
+    }
+}
+
+/// window after which a running service is deemed "healthy" and the streak
+/// can be reset to zero.
+pub const HEALTHY_WINDOW: Duration = Duration::from_secs(30);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +201,21 @@ mod tests {
     fn backoff_small_on_slow_crash() {
         let d = backoff_delay(None, 5);
         assert!(d < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn crash_backoff_caps_at_15s() {
+        assert_eq!(crash_backoff(0), Duration::from_secs(1));
+        assert_eq!(crash_backoff(1), Duration::from_secs(2));
+        assert_eq!(crash_backoff(2), Duration::from_secs(4));
+        assert_eq!(crash_backoff(3), Duration::from_secs(8));
+        assert_eq!(crash_backoff(4), Duration::from_secs(15));
+        assert_eq!(crash_backoff(99), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn quick_crash_window() {
+        assert!(is_quick_crash(Some(Instant::now())));
+        assert!(!is_quick_crash(None));
     }
 }
