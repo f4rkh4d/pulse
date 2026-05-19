@@ -4,17 +4,22 @@
 //! the actual UX lives in the `pulse` binary.
 
 pub mod agents;
+pub mod ansi_overwrite;
 pub mod app;
 pub mod config;
 pub mod deps;
 pub mod discover;
+pub mod envwatch;
 pub mod errors;
 pub mod graph;
+pub mod ipc;
 pub mod keymap;
+pub mod patterns;
 pub mod ports;
 pub mod probe;
 pub mod service;
 pub mod share;
+pub mod shellcmd;
 pub mod shutdown;
 pub mod supervisor;
 pub mod tap;

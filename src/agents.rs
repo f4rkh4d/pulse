@@ -118,7 +118,7 @@ pub fn derive_mood(
     traffic_spike: bool,
 ) -> Mood {
     match status {
-        Status::Crashed => Mood::Dead,
+        Status::Crashed | Status::CrashedTooMany => Mood::Dead,
         Status::Starting => Mood::Starting,
         Status::Stopped => Mood::Sleepy,
         Status::Running => {

@@ -13,6 +13,7 @@ fn status_color(s: Status) -> ratatui::style::Color {
         Status::Running => theme::RUNNING,
         Status::Starting => theme::STARTING,
         Status::Crashed => theme::CRASHED,
+        Status::CrashedTooMany => theme::CRASHED,
         Status::Stopped => theme::STOPPED,
     }
 }
@@ -64,6 +65,16 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                     .fg(theme::from_name(svc.spec.color.as_deref()))
                     .add_modifier(Modifier::BOLD),
             );
+            let unhealthy = if svc.unhealthy {
+                Span::styled(" •", Style::default().fg(theme::CRASHED))
+            } else {
+                Span::raw("")
+            };
+            let too_many = if matches!(svc.status, Status::CrashedTooMany) {
+                Span::styled("  [crashed-too-many]", Style::default().fg(theme::CRASHED))
+            } else {
+                Span::raw("")
+            };
             let uptime = match svc.uptime() {
                 Some(d) if svc.status == Status::Running => {
                     format!("  {}", fmt_uptime(d))
@@ -72,7 +83,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             };
             let up_span = Span::styled(uptime, Style::default().fg(theme::DIM));
 
-            let line1: Vec<Span> = vec![dot, face, name, up_span];
+            let line1: Vec<Span> = vec![dot, face, name, unhealthy, up_span, too_many];
             let mut lines = vec![Line::from(line1)];
 
             // probe badge line
