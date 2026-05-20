@@ -18,7 +18,9 @@ use tokio::sync::mpsc;
 use crate::agents::{self, Mood};
 use crate::config::Config;
 use crate::deps;
+use crate::errors::{missing_cwd_hint, port_in_use_hint};
 use crate::keymap::{map as keymap, Action};
+use crate::patterns;
 use crate::ports::{self, PortResult};
 use crate::probe::{self, ProbeResult};
 use crate::service::{Origin, Service, Status};
@@ -66,6 +68,13 @@ pub struct App {
     pub overlay: Overlay,
     pub tap_rings: Vec<Option<SharedRing>>,
     pub stop_timeout: Duration,
+    pub log_cap: usize,
+    /// deadlines for auto-restart; `(idx, when)`. sorted; earliest first.
+    pending_restarts: Vec<(usize, Instant)>,
+    /// services that exited cleanly within the "auto-restart on .env change"
+    /// window. kept so env-watch fires an immediate restart.
+    env_watchers: HashMap<usize, Box<dyn std::any::Any + Send>>,
+    env_rx: HashMap<usize, mpsc::UnboundedReceiver<()>>,
 }
 
 impl App {
@@ -80,7 +89,12 @@ impl App {
             .as_ref()
             .map(|g| g.stop_timeout_dur())
             .unwrap_or_else(|| Duration::from_millis(1500));
-        let services: Vec<Service> = cfg.services.into_iter().map(Service::new).collect();
+        let log_cap = cfg.log_buffer_size();
+        let services: Vec<Service> = cfg
+            .services
+            .into_iter()
+            .map(|s| Service::with_log_cap(s, log_cap))
+            .collect();
         let tap_rings: Vec<Option<SharedRing>> = services
             .iter()
             .map(|s| s.spec.tap.as_ref().map(|_| tap::new_ring()))
@@ -105,6 +119,10 @@ impl App {
             port_tx,
             rng: rand::rngs::StdRng::from_entropy(),
             config_path: None,
+            log_cap,
+            pending_restarts: Vec::new(),
+            env_watchers: HashMap::new(),
+            env_rx: HashMap::new(),
         }
     }
 
@@ -122,9 +140,40 @@ impl App {
         if self.children.contains_key(&idx) {
             return;
         }
+        // pre-flight: cwd exists?
+        if let Some(cwd) = &spec.cwd {
+            if !cwd.exists() {
+                let hint = missing_cwd_hint(cwd);
+                self.sys_log(idx, format!("error: {hint}"));
+                self.push_msg(format!("[{}] {hint}", spec.name));
+                if let Some(s) = self.services.get_mut(idx) {
+                    s.status = Status::Crashed;
+                }
+                return;
+            }
+        }
+        // pre-flight: port already bound by somebody else? warn but still try.
+        if let Some(pp) = &spec.port {
+            if crate::ports::listeners()
+                .iter()
+                .any(|e| e.port == pp.expect)
+            {
+                let hint = port_in_use_hint(pp.expect);
+                self.sys_log(idx, format!("warn: {hint}"));
+                self.push_msg(format!("[{}] {hint}", spec.name));
+            }
+        }
         if let Some(s) = self.services.get_mut(idx) {
             s.status = Status::Starting;
             s.last_start = Some(Instant::now());
+        }
+        // set up .env watcher lazily the first time we start this service
+        if spec.watch_env_enabled() && !self.env_watchers.contains_key(&idx) {
+            let cwd = spec.cwd.clone().unwrap_or_else(|| PathBuf::from("."));
+            if let Some((rx, guard)) = crate::envwatch::watch(&cwd) {
+                self.env_watchers.insert(idx, guard);
+                self.env_rx.insert(idx, rx);
+            }
         }
         match supervisor::spawn_one(idx, &spec, self.tx.clone()).await {
             Ok(SpawnedChild {
@@ -254,7 +303,12 @@ impl App {
         self.stop_service(idx).await;
         if let Some(s) = self.services.get_mut(idx) {
             s.restart_count = s.restart_count.saturating_add(1);
+            // manual restart wipes the auto-restart streak + unhealthy flag
+            s.crash_streak = 0;
+            s.unhealthy = false;
         }
+        // drop any auto-restart we were about to do for this service
+        self.pending_restarts.retain(|(i, _)| *i != idx);
         self.start_service(idx).await;
     }
 
@@ -310,6 +364,104 @@ impl App {
         }
     }
 
+    fn scan_for_patterns(&mut self, idx: usize, line: &str) {
+        let Some((key, snippet)) = patterns::scan(line) else {
+            return;
+        };
+        let Some(svc) = self.services.get_mut(idx) else {
+            return;
+        };
+        if !patterns::may_fire(svc, key) {
+            return;
+        }
+        svc.unhealthy = true;
+        // nudge the agent straight to Alert mood + emit a species-flavored msg
+        let name = svc.spec.name.clone();
+        let tpl = svc
+            .agent
+            .as_ref()
+            .map(|a| patterns::alert_template(a.species));
+        if let Some(agent) = svc.agent.as_mut() {
+            agent.mood = crate::agents::Mood::Alert;
+            agent.last_mood_change = Instant::now();
+        }
+        if let Some(tpl) = tpl {
+            let msg = tpl.replace("{name}", &name).replace("{line}", &snippet);
+            self.push_msg(format!("[{name}] {msg}"));
+        } else {
+            self.push_msg(format!("[{name}] log match: {snippet}"));
+        }
+    }
+
+    fn schedule_auto_restart(&mut self, idx: usize, quick_crash: bool) {
+        let streak = if let Some(s) = self.services.get_mut(idx) {
+            if quick_crash {
+                s.crash_streak = s.crash_streak.saturating_add(1);
+            } else {
+                s.crash_streak = 1;
+            }
+            s.crash_streak
+        } else {
+            return;
+        };
+        if streak >= supervisor::CRASH_GIVE_UP {
+            if let Some(s) = self.services.get_mut(idx) {
+                s.status = Status::CrashedTooMany;
+                let name = s.spec.name.clone();
+                self.push_msg(format!(
+                    "[{name}] crashed {streak}x, auto-restart giving up. press r to retry."
+                ));
+            }
+            return;
+        }
+        let delay = supervisor::crash_backoff(streak - 1);
+        let when = Instant::now() + delay;
+        self.pending_restarts.push((idx, when));
+        self.sys_log(
+            idx,
+            format!("auto-restart in {}s (streak {streak})", delay.as_secs()),
+        );
+    }
+
+    async fn run_due_restarts(&mut self) {
+        let now = Instant::now();
+        let mut ready: Vec<usize> = Vec::new();
+        self.pending_restarts.retain(|(idx, when)| {
+            if *when <= now {
+                ready.push(*idx);
+                false
+            } else {
+                true
+            }
+        });
+        for idx in ready {
+            // skip if user already restarted or stopped it
+            if self.children.contains_key(&idx) {
+                continue;
+            }
+            if let Some(s) = self.services.get(idx) {
+                if matches!(s.status, Status::CrashedTooMany | Status::Stopped) {
+                    continue;
+                }
+            }
+            self.start_service(idx).await;
+        }
+    }
+
+    /// reset the crash streak if a service has been up healthily for 30s.
+    fn reset_healthy_streaks(&mut self) {
+        for s in self.services.iter_mut() {
+            if matches!(s.status, Status::Running)
+                && s.crash_streak > 0
+                && s.started_at
+                    .map(|t| t.elapsed() >= supervisor::HEALTHY_WINDOW)
+                    .unwrap_or(false)
+            {
+                s.crash_streak = 0;
+            }
+        }
+    }
+
     fn prune_messages(&mut self) {
         let now = Instant::now();
         self.messages.retain(|m| now.duration_since(m.born) < m.ttl);
@@ -321,14 +473,22 @@ impl App {
                 self.sys_log(idx, format!("started pid {pid}"));
             }
             SupEvent::Log { idx, origin, line } => {
+                let snippet = line.clone();
                 if let Some(s) = self.services.get_mut(idx) {
                     s.push_log(origin, line);
+                }
+                // error-pattern scan — only on stdout/stderr, not system lines
+                if matches!(origin, Origin::Stdout | Origin::Stderr) {
+                    self.scan_for_patterns(idx, &snippet);
                 }
             }
             SupEvent::Exited { idx, code } => {
                 let was_tracked = self.children.remove(&idx).is_some();
                 self.stop_watchers(idx);
+                let mut quick_crash = false;
+                let mut spec_clone = None;
                 if let Some(s) = self.services.get_mut(idx) {
+                    quick_crash = supervisor::is_quick_crash(s.last_start);
                     s.started_at = None;
                     s.pid = None;
                     s.status = if was_tracked {
@@ -343,6 +503,12 @@ impl App {
                             None => "exited (killed)".into(),
                         },
                     );
+                    spec_clone = Some(s.spec.clone());
+                }
+                if let Some(spec) = spec_clone {
+                    if was_tracked && spec.auto_restart_enabled() {
+                        self.schedule_auto_restart(idx, quick_crash);
+                    }
                 }
             }
             SupEvent::SpawnError { idx, msg } => {
@@ -474,6 +640,10 @@ pub async fn run_with_path(cfg: Config, config_path: Option<PathBuf>) -> Result<
     // config watcher (hot-reload). optional; no-op if no path given.
     let mut reload_rx = config_watcher(config_path.clone());
 
+    // ipc socket for `pulse share` to grab live state.
+    let (ipc_tx, mut ipc_rx) = mpsc::unbounded_channel::<tokio::sync::oneshot::Sender<String>>();
+    let _ipc_guard = spawn_ipc_server(ipc_tx);
+
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(150));
     let mut agent_tick = tokio::time::interval(Duration::from_secs(1));
@@ -488,6 +658,9 @@ pub async fn run_with_path(cfg: Config, config_path: Option<PathBuf>) -> Result<
             _ = tick.tick() => {
                 reap_exited(&mut app);
                 app.prune_messages();
+                app.run_due_restarts().await;
+                app.reset_healthy_streaks();
+                app.poll_env_watchers().await;
                 term.draw(|f| crate::ui::draw(f, &app))?;
                 if app.quitting {
                     break Ok(());
@@ -495,6 +668,12 @@ pub async fn run_with_path(cfg: Config, config_path: Option<PathBuf>) -> Result<
             }
             _ = agent_tick.tick() => {
                 app.tick_agents();
+            }
+            Some(reply) = ipc_rx.recv() => {
+                // someone ran `pulse share` externally. produce live html, hand
+                // back via the oneshot.
+                let html = render_live_snapshot(&app);
+                let _ = reply.send(html);
             }
             Some(Ok(ev)) = events.next() => {
                 if let Event::Key(key) = ev {
@@ -577,6 +756,45 @@ pub async fn run_with_path(cfg: Config, config_path: Option<PathBuf>) -> Result<
                             } else {
                                 Overlay::None
                             };
+                        }
+                        Action::ScrollLogsUp => {
+                            let idx = app.selected;
+                            if let Some(s) = app.services.get_mut(idx) {
+                                let page = 10usize;
+                                let total = s.logs.len();
+                                s.log_scroll = (s.log_scroll + page).min(total.saturating_sub(1));
+                            }
+                        }
+                        Action::ScrollLogsDown => {
+                            let idx = app.selected;
+                            if let Some(s) = app.services.get_mut(idx) {
+                                let page = 10usize;
+                                s.log_scroll = s.log_scroll.saturating_sub(page);
+                            }
+                        }
+                        Action::ScrollLogsTop => {
+                            let idx = app.selected;
+                            if let Some(s) = app.services.get_mut(idx) {
+                                if !s.logs.is_empty() {
+                                    s.log_scroll = s.logs.len() - 1;
+                                }
+                            }
+                        }
+                        Action::ScrollLogsBottom => {
+                            let idx = app.selected;
+                            if let Some(s) = app.services.get_mut(idx) {
+                                s.log_scroll = 0;
+                            }
+                        }
+                        Action::ShareNow => {
+                            match write_live_snapshot(&app) {
+                                Ok(path) => {
+                                    app.push_msg(format!("[pulse] wrote {}", path.display()));
+                                }
+                                Err(e) => {
+                                    app.push_msg(format!("[pulse] share failed: {e}"));
+                                }
+                            }
                         }
                         Action::None => {}
                     }
@@ -701,4 +919,84 @@ async fn reload_config(app: &mut App) -> Result<()> {
     }
     app.push_msg("[pulse] config reloaded".into());
     Ok(())
+}
+
+impl App {
+    /// drain any .env-change events queued by the per-service watchers and
+    /// restart the affected services with a short debounce.
+    async fn poll_env_watchers(&mut self) {
+        let idxs: Vec<usize> = self.env_rx.keys().copied().collect();
+        let mut to_restart: Vec<usize> = Vec::new();
+        for idx in idxs {
+            let mut fired = false;
+            if let Some(rx) = self.env_rx.get_mut(&idx) {
+                while let Ok(()) = rx.try_recv() {
+                    fired = true;
+                }
+            }
+            if fired {
+                to_restart.push(idx);
+            }
+        }
+        for idx in to_restart {
+            if let Some(s) = self.services.get_mut(idx) {
+                s.push_log(Origin::System, "[pulse] .env changed, restarting".into());
+            }
+            self.restart_one(idx).await;
+        }
+    }
+}
+
+fn render_live_snapshot(app: &App) -> String {
+    let snap = crate::share::collect(&app.services, &app.tap_rings);
+    crate::share::render(&snap)
+}
+
+fn write_live_snapshot(app: &App) -> std::io::Result<PathBuf> {
+    let html = render_live_snapshot(app);
+    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let out = PathBuf::from(format!("pulse-snapshot-{ts}.html"));
+    std::fs::write(&out, html)?;
+    Ok(out)
+}
+
+/// listen on a unix socket for incoming dump requests. each request dials us
+/// in, we forward it to the app loop via the provided channel, wait for the
+/// rendered html, write it back.
+fn spawn_ipc_server(
+    tx: mpsc::UnboundedSender<tokio::sync::oneshot::Sender<String>>,
+) -> Option<IpcGuard> {
+    let path = crate::ipc::socket_path_for(std::process::id());
+    // clean up any stale socket for this pid (shouldn't exist but be safe)
+    let _ = std::fs::remove_file(&path);
+    let listener = tokio::net::UnixListener::bind(&path).ok()?;
+    let path_clone = path.clone();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let (oneshot_tx, oneshot_rx) = tokio::sync::oneshot::channel();
+                if tx.send(oneshot_tx).is_err() {
+                    return;
+                }
+                if let Ok(html) = oneshot_rx.await {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = sock.write_all(html.as_bytes()).await;
+                    let _ = sock.shutdown().await;
+                }
+            });
+        }
+    });
+    Some(IpcGuard { path: path_clone })
+}
+
+/// RAII-ish guard that deletes the socket file on drop.
+pub struct IpcGuard {
+    path: PathBuf,
+}
+
+impl Drop for IpcGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
