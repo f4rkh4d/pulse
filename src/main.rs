@@ -58,6 +58,11 @@ enum Cmd {
         /// shell to generate for (bash, zsh, fish, powershell, elvish)
         shell: clap_complete::Shell,
     },
+    /// drop into a subshell with a service's env, cwd
+    Shell {
+        /// service name as declared in pulse.toml
+        service: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -87,6 +92,7 @@ async fn main() -> Result<()> {
         Some(Cmd::Logs { service, lines }) => run_logs(&cli.config, &service, lines).await,
         Some(Cmd::Theme { cmd }) => run_theme(cmd),
         Some(Cmd::Completions { shell }) => run_completions(shell),
+        Some(Cmd::Shell { service }) => run_shell(&cli.config, &service),
         None => {
             if !cli.quiet {
                 eprint!("{}", pulse::banner(env!("CARGO_PKG_VERSION")));
@@ -140,9 +146,22 @@ fn run_ports() -> Result<()> {
 }
 
 fn run_share(cfg_path: &std::path::Path, out: Option<PathBuf>) -> Result<()> {
-    // a stub snapshot — no live state available when running as a detached
-    // subcommand. we just show the configured topology + empty probe stats.
-    // still useful for "here's my stack" handoffs.
+    let out_path = match out {
+        Some(p) => p,
+        None => {
+            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            PathBuf::from(format!("pulse-snapshot-{ts}.html"))
+        }
+    };
+    // try live: dial the most recent TUI's unix socket, read html back.
+    if let Some(sock) = pulse::ipc::find_latest_socket_with_fallback() {
+        if let Ok(html) = read_from_ipc(&sock) {
+            std::fs::write(&out_path, html)?;
+            println!("wrote {} (live state from running tui)", out_path.display());
+            return Ok(());
+        }
+    }
+    // fallback: configured-only snapshot.
     let cfg = pulse::config::load(cfg_path).map_err(|e| pulse::errors::explain(e, cfg_path))?;
     let services: Vec<pulse::service::Service> = cfg
         .services
@@ -152,16 +171,53 @@ fn run_share(cfg_path: &std::path::Path, out: Option<PathBuf>) -> Result<()> {
     let tap_rings: Vec<Option<pulse::tap::SharedRing>> = services.iter().map(|_| None).collect();
     let snap = pulse::share::collect(&services, &tap_rings);
     let html = pulse::share::render(&snap);
-    let out_path = match out {
-        Some(p) => p,
-        None => {
-            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            PathBuf::from(format!("pulse-snapshot-{ts}.html"))
-        }
-    };
     std::fs::write(&out_path, html)?;
-    println!("wrote {}", out_path.display());
+    println!(
+        "wrote {} (configured-only; no running tui found)",
+        out_path.display()
+    );
     Ok(())
+}
+
+fn read_from_ipc(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+    use std::os::unix::net::UnixStream;
+    let mut sock = UnixStream::connect(path)?;
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    let mut buf = String::new();
+    sock.read_to_string(&mut buf)?;
+    Ok(buf)
+}
+
+fn run_shell(cfg_path: &std::path::Path, service: &str) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let cfg = pulse::config::load(cfg_path).map_err(|e| pulse::errors::explain(e, cfg_path))?;
+    let parent_env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let plan = pulse::shellcmd::plan(&cfg, service, &parent_env).map_err(anyhow::Error::msg)?;
+
+    let shell_str = plan.shell.to_string_lossy().into_owned();
+    let is_zsh = shell_str.ends_with("/zsh") || shell_str.ends_with("zsh");
+    let is_bashlike =
+        shell_str.ends_with("/bash") || shell_str.ends_with("bash") || shell_str.ends_with("sh");
+
+    let mut cmd = std::process::Command::new(&plan.shell);
+    cmd.current_dir(&plan.cwd);
+    for (k, v) in &plan.env {
+        cmd.env(k, v);
+    }
+    if is_zsh {
+        let dir = pulse::shellcmd::prepare_zshrc(&plan.ps1)?;
+        cmd.env("ZDOTDIR", &dir);
+    } else if is_bashlike {
+        cmd.env("PS1", &plan.ps1);
+    }
+    println!(
+        "[pulse:{service}] dropping into {shell_str} in {}",
+        plan.cwd.display()
+    );
+    // replace this process with the shell; errors only if execve itself fails
+    let fail = cmd.exec();
+    Err(anyhow::anyhow!("replacing process failed: {fail}"))
 }
 
 async fn run_logs(cfg_path: &std::path::Path, service: &str, lines: usize) -> Result<()> {
