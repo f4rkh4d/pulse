@@ -2,7 +2,7 @@
 
 one window for every local dev server. six tmux panes is still six tmux panes, and you know it.
 
-![boot](./docs/cast-boot.gif)
+> demo gifs coming soon. the feature's ready, the cast files aren't.
 
 ```bash
 cargo install pulse
@@ -54,13 +54,7 @@ the robot species is pure ascii for fonts that don't like the others. pick per s
 
 ## gallery
 
-- ![boot](./docs/cast-boot.gif) — cold start, everything coming up
-- ![probes](./docs/cast-probe.gif) — probes flipping green, then a service crashing
-- ![tap](./docs/cast-tap.gif) — traffic tap + request detail split
-- ![graph](./docs/cast-graph.gif) — `g` for the dep graph
-- ![share](./docs/cast-share.gif) — `pulse share` making an html snapshot
-
-gifs live in `docs/`. they're placeholders right now, real asciinema casts land before 0.4.
+demo gifs coming soon. the feature's ready, the cast files aren't. run `pulse` in an example project to see it in action for now.
 
 ## stack examples
 
