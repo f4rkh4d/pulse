@@ -2,10 +2,15 @@
 
 one window for every local dev server. six tmux panes is still six tmux panes, and you know it.
 
-> demo gifs coming soon. the feature's ready, the cast files aren't.
+![demo](docs/hero.gif)
 
 ```bash
-cargo install pulse
+brew install f4rkh4d/tap/pulse
+# or
+curl -fsSL https://pulse.frkhd.com/install.sh | sh
+# or
+cargo install --git https://github.com/f4rkh4d/pulse
+
 cd your-project
 pulse init    # scans for package.json / docker-compose / Procfile, drafts a pulse.toml
 pulse
@@ -54,7 +59,7 @@ the robot species is pure ascii for fonts that don't like the others. pick per s
 
 ## gallery
 
-demo gifs coming soon. the feature's ready, the cast files aren't. run `pulse` in an example project to see it in action for now.
+more casts incoming as i have time to record them. for now: clone an example config, run `pulse`, watch a small city boot.
 
 ## stack examples
 
