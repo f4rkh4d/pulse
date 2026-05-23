@@ -59,7 +59,13 @@ the robot species is pure ascii for fonts that don't like the others. pick per s
 
 ## gallery
 
-more casts incoming as i have time to record them. for now: clone an example config, run `pulse`, watch a small city boot.
+**auto-generate a config from an existing project.** reads your `package.json` scripts + `docker-compose.yml` + `Procfile` and drafts a runnable `pulse.toml`:
+
+![pulse init](docs/init.gif)
+
+**see who's holding a port locally.** no more `lsof` + grep dance:
+
+![pulse ports](docs/ports.gif)
 
 ## stack examples
 
