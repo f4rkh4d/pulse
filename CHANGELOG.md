@@ -2,7 +2,7 @@
 
 all notable changes to pulse. dates in iso, semver-ish. lowercase because that's how i roll.
 
-## 0.3.0 — 2026-05-04
+## 0.3.0. 2026-05-04
 
 the traffic-tap release. got tired of flipping to a separate browser devtools just to see what my own api was doing.
 
@@ -22,9 +22,9 @@ the traffic-tap release. got tired of flipping to a separate browser devtools ju
 ### notes
 - passive-mode tap is a stub. says so in the system log when you configure it. proxy mode is the real feature and what you should use
 - the proxy forwards raw bytes after the first header block. websocket upgrades pass through but don't get re-parsed
-- the share exporter run as a subcommand only sees config, not live probe/tap state — the subcommand stubs those fields. same file format as the in-tui export would produce
+- the share exporter run as a subcommand only sees config, not live probe/tap state. the subcommand stubs those fields. same file format as the in-tui export would produce
 
-## 0.2.0 — 2026-03-21
+## 0.2.0. 2026-03-21
 
 the one where services got agents and started talking.
 
@@ -32,12 +32,12 @@ the one where services got agents and started talking.
 - **http probes**. `[service.probe]` with `url`, `interval`, `timeout`, optional `expect_status`. sidebar badge shows last status code, latency, rolling success rate over 60 samples
 - **port detection**. `[service.port] expect = 3000` pings tcp every 2s, shows bound/free
 - **ascii agents**. five species (goblin, cat, ghost, robot, blob). faces change with status, they say things in the statusbar on transitions
-- **auto-discovery** via `pulse init` — reads package.json scripts, docker-compose services, Procfile entries
+- **auto-discovery** via `pulse init`. reads package.json scripts, docker-compose services, Procfile entries
 - **`depends_on`** with restart cascade. bouncing a parent bounces its children after a 1s grace
 - **config hot-reload**. edit `pulse.toml`, diff runs, new services spawn, removed ones get killed
-- **config validation** — unknown keys, unparseable durations, bad agent kinds, circular deps all fail at load with a useful message
+- **config validation**. unknown keys, unparseable durations, bad agent kinds, circular deps all fail at load with a useful message
 
-## 0.1.0 — 2026-02-14
+## 0.1.0. 2026-02-14
 
 the mvp. enough to replace my tmux setup.
 

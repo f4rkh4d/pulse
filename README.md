@@ -129,12 +129,12 @@ save `pulse.toml`, run `pulse`. edit the file while it's running and the watcher
 
 ## subcommands
 
-- `pulse init` — scan cwd and draft a `pulse.toml`. reads `package.json` scripts (`dev`, `start`, `watch`, `test:watch`, `serve`), `docker-compose.yml` services, and `Procfile` entries
-- `pulse ports` — list every process holding a LISTEN tcp port on this box. shells out to `lsof`, unix only
-- `pulse logs <service> [--lines N]` — run a single service and print its logs. good for pipelines
-- `pulse share [--out path]` — export current config as a single-file html snapshot
-- `pulse theme dump` — print the default palette as a starter `theme.toml`
-- `pulse completions <shell>` — emit a completion script. bash/zsh/fish/powershell/elvish
+- `pulse init`. scan cwd and draft a `pulse.toml`. reads `package.json` scripts (`dev`, `start`, `watch`, `test:watch`, `serve`), `docker-compose.yml` services, and `Procfile` entries
+- `pulse ports`. list every process holding a LISTEN tcp port on this box. shells out to `lsof`, unix only
+- `pulse logs <service> [--lines N]`. run a single service and print its logs. good for pipelines
+- `pulse share [--out path]`. export current config as a single-file html snapshot
+- `pulse theme dump`. print the default palette as a starter `theme.toml`
+- `pulse completions <shell>`. emit a completion script. bash/zsh/fish/powershell/elvish
 
 shell completion, one-liners:
 
